@@ -5,6 +5,9 @@ import cv2
 import numpy as np
 import face_recognition
 import datetime
+from datetime import time
+import sendMail
+import arduino
 
 # Connect to the database
 connection = mysql.connector.connect(host="localhost", user="root", password="", database="entreprise")
@@ -56,6 +59,7 @@ while True:
     face_encodings = face_recognition.face_encodings(frame, face_locations)
 
     face_names = []
+    command_sent = False 
     for face_encoding in face_encodings:
         # Compare faces with known faces
         matches = face_recognition.compare_faces(known_face_encodings, face_encoding)
@@ -65,7 +69,18 @@ while True:
             name = known_face_names[first_match_index]
             current_time = datetime.datetime.now().strftime("%H:%M:%S")
             prenom, nom = name.split(' ')
-            cursor.execute("UPDATE personnel SET temps = %s WHERE nom = %s AND prenom = %s", (current_time, nom, prenom))
+            cursor.execute("SELECT EXISTS (SELECT 1 FROM pointage WHERE id= (SELECT id FROM personnel WHERE nom = %s AND prenom = %s) AND date = %s) AS personnel_present",(nom,prenom,datetime.datetime.now().date()))
+            x=cursor.fetchone()
+            if x[0] == 0:
+                cursor.execute("INSERT INTO pointage (id, date, heure) SELECT (select p.id FROM personnel p WHERE p.nom = %s AND p.prenom = %s ),%s,%s",((nom, prenom,datetime.datetime.now().date(),datetime.datetime.now().time())))
+            #send MAIL
+            if not sendMail.est_deja_envoye(name) and datetime.datetime.now().time() > time(8,30):
+                sendMail.send_email('Reclamation de retard', name)
+                sendMail.enregistrer_envoi(name)
+            #ouvrir port
+            if not command_sent:
+                response = arduino.send_command('on')
+                command_sent = True
             connection.commit()
 
         face_names.append(name)
@@ -87,3 +102,4 @@ cv2.destroyAllWindows()
 # Close connection to the database
 cursor.close()
 connection.close()
+
